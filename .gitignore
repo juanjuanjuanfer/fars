@@ -1,6 +1,8 @@
 # Data
 /data/
 
+.secrets
+
 # Mac OS-specific storage files
 .DS_Store
 
