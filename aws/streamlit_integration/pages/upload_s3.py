@@ -42,7 +42,7 @@ def detect_and_process_face(image_bytes):
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
         # Load the cascade classifier
-        face_cascade = cv2.CascadeClassifier('models/haarcascade_frontalface_default.xml')
+        face_cascade = cv2.CascadeClassifier('aws/streamlit_integration/models/haarcascade_frontalface_default.xml')
         
         # Convert to grayscale
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
