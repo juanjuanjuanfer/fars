@@ -34,20 +34,20 @@ def get_db_connection():
         st.error(f"Error connecting to MySQL database: {str(e)}")
         return None
 
-def get_classes():
-    """Fetch all classes from database"""
+def get_courses():
+    """Fetch all courses from database"""
     connection = get_db_connection()
     if not connection:
         return []
     
     try:
         cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM courses")
-        classes = cursor.fetchall()
-        return classes
+        cursor.execute("SELECT * FROM courses")  # Keeping table name as 'classes' but selecting course fields
+        courses = cursor.fetchall()
+        return courses
     
     except Error as e:
-        st.error(f"Error fetching classes: {str(e)}")
+        st.error(f"Error fetching courses: {str(e)}")
         return []
     
     finally:
@@ -56,42 +56,44 @@ def get_classes():
             connection.close()
 
 def main():
-    st.title("Class Selection")
+    st.title("Course Selection")
     
-    # Initialize session state for selected class
-    if 'selected_class' not in st.session_state:
-        st.session_state.selected_class = None
+    # Initialize session state for selected course
+    if 'selected_course' not in st.session_state:
+        st.session_state.selected_course = None
     
-    # Get classes from database
-    with st.spinner("Fetching classes from database..."):
-        classes = get_classes()
+    # Get courses from database
+    with st.spinner("Fetching courses from database..."):
+        courses = get_courses()
     
-    if not classes:
-        st.error("No classes found or unable to fetch classes.")
+    if not courses:
+        st.error("No courses found or unable to fetch courses.")
         if st.button("Retry"):
             st.rerun()
         return
     
-    # Create selectbox with class names
-    class_names = [c['name'] if isinstance(c, dict) else c[1] for c in classes]  # Adjust index based on your table structure
-    selected_class_name = st.selectbox(
-        "Select a class:",
-        options=class_names,
+    # Create selectbox with course names
+    course_names = [c['course_name'] for c in courses]
+    selected_course_name = st.selectbox(
+        "Select a course:",
+        options=course_names,
         index=None,
-        placeholder="Choose a class..."
+        placeholder="Choose a course..."
     )
     
-    # Store selected class in session state
-    if selected_class_name:
-        selected_class = next((c for c in classes if (c['name'] if isinstance(c, dict) else c[1]) == selected_class_name), None)
-        st.session_state.selected_class = selected_class
+    # Store selected course in session state
+    if selected_course_name:
+        selected_course = next((c for c in courses if c['course_name'] == selected_course_name), None)
+        st.session_state.selected_course = selected_course
         
-        # Show selected class details
-        st.write("Selected class details:")
-        st.json(selected_class)
+        # Show selected course details
+        st.write("Selected course details:")
+        st.write(f"Course ID: {selected_course['course_id']}")
+        st.write(f"Course Name: {selected_course['course_name']}")
+        st.write(f"Course Owner: {selected_course['course_owner']}")
         
         # Button to navigate to next page
-        if st.button("Continue with selected class"):
+        if st.button("Continue with selected course"):
             st.switch_page("pages/02_process_class.py")
 
 if __name__ == "__main__":
@@ -101,24 +103,27 @@ if __name__ == "__main__":
 import streamlit as st
 
 def main():
-    st.title("Process Class")
+    st.title("Process Course")
     
-    # Check if class is selected
-    if 'selected_class' not in st.session_state or not st.session_state.selected_class:
-        st.error("No class selected. Please select a class first.")
-        if st.button("Go to class selection"):
+    # Check if course is selected
+    if 'selected_course' not in st.session_state or not st.session_state.selected_course:
+        st.error("No course selected. Please select a course first.")
+        if st.button("Go to course selection"):
             st.switch_page("pages/01_select_class.py")
         return
     
-    # Display selected class information
-    st.write("Working with class:")
-    st.json(st.session_state.selected_class)
+    # Display selected course information
+    st.write("Working with course:")
+    selected_course = st.session_state.selected_course
+    st.write(f"Course ID: {selected_course['course_id']}")
+    st.write(f"Course Name: {selected_course['course_name']}")
+    st.write(f"Course Owner: {selected_course['course_owner']}")
     
     # Add your processing logic here
     
-    # Button to go back to class selection
-    if st.button("Select different class"):
-        st.session_state.selected_class = None
+    # Button to go back to course selection
+    if st.button("Select different course"):
+        st.session_state.selected_course = None
         st.switch_page("pages/01_select_class.py")
 
 if __name__ == "__main__":
