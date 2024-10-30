@@ -2,11 +2,20 @@ import boto3
 from botocore.exceptions import ClientError
 import cv2
 import numpy as np
+import toml
 
 
 def connect_to_s3():
     """Create a connection to S3"""
-    s3 = boto3.client('s3')
+    credentials = {
+        "aws_access_key_id": "<YOUR_AwsAccessKey_HERE>",
+        "aws_secret_access_key": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        "region_name": "us-east-1"    }
+    # read credentials from .secrets/secrets.toml
+    with open("fars\\.secrets\\secrets.toml", "r") as f:
+        credentials = toml.load(f)["aws"]
+
+    s3 = boto3.client('s3', **credentials)
     return s3
 
 def get_bucket_images(bucket_name):
@@ -30,7 +39,15 @@ def get_bucket_images(bucket_name):
 
 def connect_to_rekognition():
     """Create a connection to Rekognition"""
-    rekognition = boto3.client('rekognition')
+    credentials = {
+        "aws_access_key_id": "<YOUR_AwsAccessKey_HERE>",
+        "aws_secret_access_key": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        "region_name": "us-east-1",
+        "bucket_name": "bucket"    }
+    # read credentials from .secrets/secrets.toml
+    with open("fars\\.secrets\\secrets.toml", "r") as f:
+        credentials = toml.load(f)["reko"]
+    rekognition = boto3.client('rekognition', **credentials)
     return rekognition
 
 def capture_image_with_opencv():

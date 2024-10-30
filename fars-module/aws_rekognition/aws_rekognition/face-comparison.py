@@ -5,7 +5,7 @@ def main():
     """Main function"""
     # Load secrets from .secrets/secrets.toml
     secrets = toml.load('fars/.secrets/secrets.toml')
-    bucket_name = secrets['aws']["bucket_name"]
+    bucket_name = secrets['bucket']["bucketname"]
     
     try:
         # Get list of images from bucket
