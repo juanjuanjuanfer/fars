@@ -39,32 +39,58 @@ def main():
 
     # Capture Stage
     if st.session_state.stage == 'capture':
-        image_name = st.text_input("Enter student id")
-
-        # verify if student not already on course
-        if not image_name:
-            st.warning("Please enter an image name")
-            return
+        student_id = st.text_input("Enter student ID")
         
-        # Add file extension if not provided
-        if not image_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-            image_name += '.jpg'
-        
-        picture = st.camera_input("Take a picture")
-        
-        if picture:
-            st.session_state.original_image = picture
-            processed_image, error = utils.detect_and_process_face(picture.getvalue())
+        if student_id:
+            # First check if student exists in course
+            student_list = utils.get_student_list(selected_course['course_id'])
+            if student_list:
+                for x in student_list:
+                    if x['list_student_id'] == int(student_id):
+                        st.warning("Student already registered in this course")
+                        reset_app()
+                        return
             
+            # Then check if student exists in database
+            exists, error = utils.check_student_exists(student_id)
             if error:
-                st.error(error)
-                if st.button("Retry"):
-                    reset_app()
-            else:
-                st.session_state.processed_image = processed_image
-                st.session_state.image_name = image_name
-                st.session_state.stage = 'review'
-                st.rerun()
+                st.error(f"Error checking student: {error}")
+                return
+                
+            # If student doesn't exist, collect additional information
+            if not exists:
+                student_name = st.text_input("Enter student name")
+                student_email = st.text_input("Enter student email")
+                
+                if student_name and student_email:
+                    # Register the student in the database
+                    success, error = utils.register_student(student_id, student_name, student_email)
+                    if error:
+                        st.error(f"Error registering student: {error}")
+                        return
+                    if not success:
+                        st.error("Failed to register student")
+                        return
+            
+            # Add file extension for the image
+            image_name = f"{student_id}.jpg"
+            
+            picture = st.camera_input("Take a picture")
+            
+            if picture:
+                st.session_state.original_image = picture
+                processed_image, error = utils.detect_and_process_face(picture.getvalue())
+                
+                if error:
+                    st.error(error)
+                    if st.button("Retry"):
+                        reset_app()
+                else:
+                    st.session_state.processed_image = processed_image
+                    st.session_state.image_name = image_name
+                    st.session_state.student_id = student_id
+                    st.session_state.stage = 'review'
+                    st.rerun()
 
     # Review Stage
     elif st.session_state.stage == 'review':
@@ -110,8 +136,19 @@ def main():
         )
         
         if success:
-            st.success(f"Image '{st.session_state.image_name}' successfully uploaded to S3!")
-            if st.button("Start New Capture"):
+            # Register student in the course
+            success, error = utils.insert_student_into_list(
+                st.session_state.student_id,
+                selected_course['course_id']
+            )
+            if error:
+                st.error(f"Error registering student in course: {error}")
+            elif not success:
+                st.error("Failed to register student in course")
+            else:
+                st.success(f"Student successfully registered and image uploaded!")
+            
+            if st.button("Start New Registration"):
                 reset_app()
         else:
             st.error("Failed to upload image.")
