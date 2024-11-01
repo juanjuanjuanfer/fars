@@ -1,160 +1,175 @@
 import streamlit as st
-from io import BytesIO
-import utils
+import utils as utils
+import sys
+import os
 
-
+# Add the parent directory to sys.path if utils.py is in the parent directory
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
 
 def main():
-    # Initialize session state
-    if 'stage' not in st.session_state:
-        st.session_state.stage = 'capture'
-    if 'processed_image' not in st.session_state:
-        st.session_state.processed_image = None
-    if 'original_image' not in st.session_state:
-        st.session_state.original_image = None
-
-    st.title("Student Registration")
-
+    # Page configuration
+    st.set_page_config(
+        page_title="FARS Course Selection",
+        page_icon="📚",
+        layout="centered"
+    )
     
-    try:
-        
-        selected_course = st.session_state.selected_course
-        st.write("Working with course:")
-        st.write(f"Course ID: {selected_course['course_id']}")
-        st.write(f"Course Name: {selected_course['course_name']}")
-        st.write(f"Course Owner: {selected_course['course_owner']}")
-    except:
-        st.switch_page("pages/login.py")
-        return
-
-    if st.button("Select different course"):
-        st.session_state.selected_course = None
-        st.switch_page("pages/courses.py")
-
-    def reset_app():
-        st.session_state.stage = 'capture'
-        st.session_state.processed_image = None
-        st.session_state.original_image = None
-        st.rerun()
-
-    # Capture Stage
-    if st.session_state.stage == 'capture':
-        student_id = st.text_input("Enter student ID")
-        
-        if student_id:
-            # First check if student exists in course
-            student_list = utils.get_student_list(selected_course['course_id'])
-            if student_list:
-                for x in student_list:
-                    if x['list_student_id'] == int(student_id):
-                        st.warning("Student already registered in this course")
-                        reset_app()
-                        return
-            
-            # Then check if student exists in database
-            exists, error = utils.check_student_exists(student_id)
-            if error:
-                st.error(f"Error checking student: {error}")
-                return
-                
-            # If student doesn't exist, collect additional information
-            if not exists:
-                student_name = st.text_input("Enter student name")
-                student_email = st.text_input("Enter student email")
-                
-                if student_name and student_email:
-                    # Register the student in the database
-                    success, error = utils.register_student(student_id, student_name, student_email)
-                    if error:
-                        st.error(f"Error registering student: {error}")
-                        return
-                    if not success:
-                        st.error("Failed to register student")
-                        return
-            
-            # Add file extension for the image
-            image_name = f"{student_id}.jpg"
-            
-            picture = st.camera_input("Take a picture")
-            
-            if picture:
-                st.session_state.original_image = picture
-                processed_image, error = utils.detect_and_process_face(picture.getvalue())
-                
-                if error:
-                    st.error(error)
-                    if st.button("Retry"):
-                        reset_app()
-                else:
-                    st.session_state.processed_image = processed_image
-                    st.session_state.image_name = image_name
-                    st.session_state.student_id = student_id
-                    st.session_state.stage = 'review'
-                    st.rerun()
-
-    # Review Stage
-    elif st.session_state.stage == 'review':
-        st.write("Review processed image:")
-        st.image(st.session_state.processed_image, caption="Processed Face Image")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Accept Image"):
-                st.session_state.stage = 'upload'
-                st.rerun()
-        with col2:
-            if st.button("Retry Capture"):
-                reset_app()
-
-    # Upload Stage
-    elif st.session_state.stage == 'upload':
-        # Initialize S3 connection
-        with st.spinner("Initializing S3 connection..."):
-            credentials = utils.read_credentials(option="s3")
-            if not credentials:
-                if st.button("Retry"):
-                    reset_app()
-                return
-            
-            s3 = utils.get_s3(credentials)
-            if not s3:
-                if st.button("Retry"):
-                    reset_app()
-                return
-        
-        # Convert PIL Image to bytes
-        img_byte_arr = BytesIO()
-        st.session_state.processed_image.save(img_byte_arr, format='JPEG')
-        img_byte_arr = img_byte_arr.getvalue()
-
-        # Upload the image
-        success = utils.upload_to_s3(
-            img_byte_arr,
-            "fars-bucket-v1",
-            st.session_state.image_name,
-            s3
+    # Custom CSS for enhanced styling
+    st.markdown("""
+        <style>
+        /* General background */
+        body {
+            background-color: #f0f2f6;
+        }
+        /* Course selection container */
+        .course-container {
+            background-color: #ffffff;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            max-width: 700px;
+            margin: auto;
+        }
+        /* Main title */
+        .main-title {
+            font-size: 2.5rem;
+            color: #4A90E2; /* Primary blue */
+            text-align: center;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        /* Subtitle */
+        .subtitle {
+            font-size: 1rem;
+            color: #7f8c8d; /* Gray color */
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        /* Selectbox styling */
+        .stSelectbox>div>div>select {
+            border-radius: 5px;
+            padding: 10px;
+            border: 1px solid #ccc;
+        }
+        /* Buttons */
+        .stButton>button {
+            background-color: #4A90E2; /* Primary blue */
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            width: 100%;
+            margin-top: 10px;
+        }
+        .stButton>button:hover {
+            background-color: #357ABD; /* Darker blue on hover */
+        }
+        /* Secondary button (Go to Attendance) */
+        .stButton.secondary>button {
+            background-color: #2980b9; /* Secondary blue */
+        }
+        .stButton.secondary>button:hover {
+            background-color: #1c5980; /* Darker secondary blue on hover */
+        }
+        /* Success and warning messages */
+        .stAlert {
+            border-radius: 5px;
+            padding: 10px;
+        }
+        /* Centered images */
+        .image-center {
+            display: block;
+            margin-left: auto;
+            margin-right: auto;
+            width: 50%;
+        }
+        /* Course details section */
+        .course-details {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+        </style>
+        """, unsafe_allow_html=True)
+    
+    # Course selection form container
+    with st.container():
+        st.markdown('<div class="course-container">', unsafe_allow_html=True)
+        st.markdown('<h1 class="main-title">Course Selection</h1>', unsafe_allow_html=True)
+        st.markdown('<p class="subtitle">Select a course to manage attendance and student registrations</p>', unsafe_allow_html=True)
+    
+        # Check if the user is logged in
+        if 'username' not in st.session_state:
+            st.error("Please log in first.")
+            if st.button("Go to Login", key="goto_login", css_class="secondary"):
+                st.switch_page("pages/login.py")
+            st.markdown('</div>', unsafe_allow_html=True)
+            return
+    
+        st.success(f"Welcome, **{st.session_state.username}**!")
+    
+        # Initialize session state for selected course
+        if 'selected_course' not in st.session_state:
+            st.session_state.selected_course = None
+    
+        # Fetch courses from the database
+        with st.spinner("Fetching courses from the database..."):
+            courses = utils.get_courses(st.session_state.username)
+    
+        if not courses:
+            st.warning("No courses found for your account.")
+            if st.button("Retry", key="retry_fetch"):
+                st.experimental_rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+            return
+    
+        # Create a selectbox with course names
+        course_names = [c['course_name'] for c in courses]
+        selected_course_name = st.selectbox(
+            "Select a course:",
+            options=course_names,
+            index=None,
+            placeholder="Choose a course..."
         )
-        
-        if success:
-            # Register student in the course
-            success, error = utils.insert_student_into_list(
-                st.session_state.student_id,
-                selected_course['course_id']
-            )
-            if error:
-                st.error(f"Error registering student in course: {error}")
-            elif not success:
-                st.error("Failed to register student in course")
-            else:
-                st.success(f"Student successfully registered and image uploaded!")
-            
-            if st.button("Start New Registration"):
-                reset_app()
-        else:
-            st.error("Failed to upload image.")
-            if st.button("Retry Upload"):
-                st.session_state.stage = 'upload'
-                st.rerun()
+    
+        # Store selected course in session state and display details
+        if selected_course_name:
+            selected_course = next((c for c in courses if c['course_name'] == selected_course_name), None)
+            st.session_state.selected_course = selected_course
+    
+            # Display selected course details with owner information
+            st.markdown('<div class="course-details">', unsafe_allow_html=True)
+            st.markdown("### Selected Course Details")
+            col1, col2 = st.columns(2)
+    
+            with col1:
+                st.markdown("**Course Information:**")
+                st.write(f"• **Course Name:** {selected_course['course_name']}")
+                st.write(f"• **Course ID:** {selected_course['course_id']}")
+    
+            with col2:
+                st.markdown("**Owner Information:**")
+                st.write(f"• **Owner Name:** {selected_course['owner_name']}")
+                st.write(f"• **Owner Email:** {selected_course['owner_email']}")
+            st.markdown('</div>', unsafe_allow_html=True)
+    
+            # Navigation buttons
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Register Student", key="register_student"):
+                    st.switch_page("pages/student_registration.py")
+            with col2:
+                if st.button("Take Attendance", key="take_attendance", css_class="secondary"):
+                    st.switch_page("pages/attendance.py")
+    
+        st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
