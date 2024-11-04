@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import datetime
+from botocore.exceptions import ClientError
 
 
 def read_db_credentials():
@@ -424,6 +425,272 @@ def register_attendance(student_id, course_id, status, date=None):
         return True, None
     except Error as e:
         return False, f"Failed to register attendance: {str(e)}"
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+# Add these functions to your utils.py
+
+def create_collection(rekognition_client, collection_id):
+    """Create a Rekognition collection if it doesn't exist"""
+    try:
+        # Check if collection exists
+        try:
+            rekognition_client.describe_collection(CollectionId=collection_id)
+            return True, None
+        except rekognition_client.exceptions.ResourceNotFoundException:
+            # Create new collection if it doesn't exist
+            rekognition_client.create_collection(CollectionId=collection_id)
+            return True, None
+    except Exception as e:
+        return False, str(e)
+
+def process_face_image(image_bytes):
+    """Process face image for optimal recognition"""
+    try:
+        # Convert bytes to PIL Image
+        image = Image.open(BytesIO(image_bytes))
+        
+        # Convert to grayscale
+        gray_image = image.convert('L')
+        
+        # Resize to standard size (adjust dimensions as needed)
+        standard_size = (800, 800)
+        resized_image = gray_image.resize(standard_size, Image.Resampling.LANCZOS)
+        
+        # Convert back to bytes
+        img_byte_arr = BytesIO()
+        resized_image.save(img_byte_arr, format='JPEG')
+        
+        return img_byte_arr.getvalue(), None
+    except Exception as e:
+        return None, str(e)
+
+def check_face_quality(rekognition_client, image_bytes):
+    """Check if face image meets quality standards"""
+    try:
+        response = rekognition_client.detect_faces(
+            Image={'Bytes': image_bytes},
+            Attributes=['ALL']
+        )
+        
+        if not response['FaceDetails']:
+            return False, "No face detected"
+            
+        face = response['FaceDetails'][0]
+        
+        # Check face quality metrics
+        if face['Confidence'] < 90:
+            return False, "Low confidence in face detection"
+            
+        if abs(face['Pose']['Yaw']) > 15:
+            return False, "Face is turned too much to the side"
+            
+        if abs(face['Pose']['Pitch']) > 15:
+            return False, "Face is tilted too much up or down"
+            
+        if face['Quality']['Brightness'] < 50:
+            return False, "Image is too dark"
+            
+        if face['Quality']['Sharpness'] < 50:
+            return False, "Image is not sharp enough"
+            
+        return True, None
+        
+    except Exception as e:
+        return False, str(e)
+    
+
+def initialize_aws_services(credentials):
+    """Initialize AWS services with proper error handling"""
+    try:
+        session = boto3.Session(
+            aws_access_key_id=credentials['aws_access_key_id'],
+            aws_secret_access_key=credentials['aws_secret_access_key'],
+            region_name=credentials['region_name']
+        )
+        
+        s3 = session.client('s3')
+        rekognition = session.client('rekognition')
+        
+        # Test connections without listing all buckets
+        # Test S3 access by trying to list the specific bucket
+        try:
+            s3.head_bucket(Bucket="fars-bucket-v1")
+        except Exception as e:
+            return None, None, f"S3 Bucket access error: {str(e)}"
+            
+        # Test Rekognition access
+        try:
+            rekognition.list_collections()
+        except Exception as e:
+            return None, None, f"Rekognition access error: {str(e)}"
+        
+        return s3, rekognition, None
+    except Exception as e:
+        return None, None, f"AWS initialization error: {str(e)}"
+def create_collection(rekognition_client, collection_id):
+    """Create a Rekognition collection if it doesn't exist"""
+    try:
+        rekognition_client.create_collection(CollectionId=collection_id)
+        return True, None
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceAlreadyExistsException':
+            return True, None
+        return False, str(e)
+
+def index_faces_in_collection(rekognition_client, s3_client, bucket, collection_id, course_id):
+    """Index all student faces from S3 into a Rekognition collection"""
+    try:
+        # Get list of student IDs for the course
+        students = get_student_list(course_id)
+        
+        for student in students:
+            student_id = student['list_student_id']
+            image_key = f"{student_id}.jpg"
+            
+            try:
+                # Check if image exists in S3
+                s3_client.head_object(Bucket=bucket, Key=image_key)
+                
+                # Index face
+                response = rekognition_client.index_faces(
+                    CollectionId=collection_id,
+                    Image={
+                        'S3Object': {
+                            'Bucket': bucket,
+                            'Name': image_key
+                        }
+                    },
+                    ExternalImageId=str(student_id),
+                    MaxFaces=1,
+                    QualityFilter="AUTO",
+                    DetectionAttributes=['ALL']
+                )
+                
+                if not response['FaceRecords']:
+                    print(f"No face detected in image for student {student_id}")
+                    
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'NoSuchKey':
+                    print(f"Image not found for student {student_id}")
+                else:
+                    print(f"Error processing student {student_id}: {str(e)}")
+                continue
+                
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+def search_face_in_collection(rekognition_client, image_bytes, collection_id):
+    """Search for a face in the Rekognition collection"""
+    try:
+        response = rekognition_client.search_faces_by_image(
+            CollectionId=collection_id,
+            Image={'Bytes': image_bytes},
+            MaxFaces=1,
+            FaceMatchThreshold=70
+        )
+        
+        if response['FaceMatches']:
+            match = response['FaceMatches'][0]
+            student_id = match['Face']['ExternalImageId']
+            confidence = match['Similarity']
+            return student_id, confidence
+            
+        return None, None
+        
+    except ClientError as e:
+        print(f"Error searching face: {str(e)}")
+        return None, None
+
+def verify_s3_bucket(s3_client, bucket_name):
+    """Verify S3 bucket exists and is accessible"""
+    try:
+        s3_client.head_bucket(Bucket=bucket_name)
+        return True, None
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '404':
+            return False, f"Bucket {bucket_name} does not exist"
+        elif error_code == '403':
+            return False, f"No permission to access bucket {bucket_name}"
+        return False, str(e)
+    
+# Add these to your utils.py
+
+def get_attendance_count(course_id, date):
+    """Get count of attendance records for a specific date"""
+    connection = get_db_connection()
+    if not connection:
+        return 0
+        
+    try:
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) as count 
+            FROM attendance 
+            WHERE attendance_class_id = %s 
+            AND attendance_date = %s
+        """, (course_id, date))
+        
+        result = cursor.fetchone()
+        return result[0] if result else 0
+        
+    except Error as e:
+        print(f"Error getting attendance count: {e}")
+        return 0
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def get_attendance_for_date(course_id, date):
+    """Get all attendance records for a specific date"""
+    connection = get_db_connection()
+    if not connection:
+        return None
+        
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT * FROM attendance 
+            WHERE attendance_class_id = %s 
+            AND attendance_date = %s
+        """, (course_id, date))
+        
+        return cursor.fetchall()
+        
+    except Error as e:
+        print(f"Error getting attendance records: {e}")
+        return None
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def delete_attendance_for_date(course_id, date):
+    """Delete all attendance records for a specific date"""
+    connection = get_db_connection()
+    if not connection:
+        return False, "Database connection failed"
+        
+    try:
+        cursor = connection.cursor()
+        cursor.execute("""
+            DELETE FROM attendance 
+            WHERE attendance_class_id = %s 
+            AND attendance_date = %s
+        """, (course_id, date))
+        
+        connection.commit()
+        if cursor.rowcount > 0:
+            return True, None
+        else:
+            return False, "No records found to delete"
+            
+    except Error as e:
+        return False, f"Error deleting attendance records: {str(e)}"
     finally:
         if connection.is_connected():
             cursor.close()
