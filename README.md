@@ -1,5 +1,8 @@
 # FARS - Facial Attendance Recognition System 👥
 
+[![GitHub stars](https://img.shields.io/github/stars/juanjuanjuanfer/fars.svg?style=social&label=Star)](https://github.com/juanjuanjuanfer/fars)
+[![GitHub forks](https://img.shields.io/github/forks/juanjuanjuanfer/fars.svg?style=social&label=Fork)](https://github.com/juanjuanjuanfer/fars/fork)
+[![GitHub watchers](https://img.shields.io/github/watchers/juanjuanjuanfer/fars.svg?style=social&label=Watch)](https://github.com/juanjuanjuanfer/fars)
 [![Python Version](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://streamlit.io/apps)
