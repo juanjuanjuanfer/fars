@@ -13,7 +13,7 @@ from botocore.exceptions import ClientError
 
 def read_db_credentials():
     try:
-        with open(".secrets/secrets.toml", "r") as f:
+        with open(".streamlit/secrets.toml", "r") as f:
             creds = toml.load(f)["mysql"]
             return creds
     except Exception as e:
@@ -77,7 +77,7 @@ def get_courses(username):
 
 def read_credentials(option = "aws"):
     try:
-        with open(".secrets/secrets.toml", "r") as f:
+        with open(".streamlit/secrets.toml", "r") as f:
             aws_credentials = {
                 "aws_access_key_id": "your-access-key-id",
                 "aws_secret_access_key": "your-secret-access-key",
