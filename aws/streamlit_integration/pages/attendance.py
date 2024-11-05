@@ -3,7 +3,7 @@ import utils
 from datetime import datetime
 
 def process_bulk_attendance(course_id, date, status):
-    """Mark all students with specified attendance status"""
+    """Mark students without attendance records with specified attendance status"""
     connection = utils.get_db_connection()
     if not connection:
         return False, "Database connection failed"
@@ -16,7 +16,7 @@ def process_bulk_attendance(course_id, date, status):
         if not students:
             return False, "No students found in this course"
         
-        # Get existing attendance records
+        # Get existing attendance records for the day
         cursor.execute("""
             SELECT attendance_student_id 
             FROM attendance 
@@ -26,45 +26,41 @@ def process_bulk_attendance(course_id, date, status):
         
         existing_records = [r[0] for r in cursor.fetchall()]
         
-        # Process attendance for all students
+        # Process attendance only for students without records
         success_count = 0
         error_count = 0
+        skipped_count = 0
         
         for student in students:
             student_id = student['list_student_id']
             
             try:
                 if student_id in existing_records:
-                    # Update existing record
-                    cursor.execute("""
-                        UPDATE attendance 
-                        SET attendance_status = %s 
-                        WHERE attendance_student_id = %s 
-                        AND attendance_class_id = %s 
-                        AND attendance_date = %s
-                    """, (status, student_id, course_id, date))
+                    # Skip students who already have attendance recorded
+                    skipped_count += 1
+                    continue
                 else:
-                    # Insert new record
+                    # Insert new record only for students without attendance
                     cursor.execute("""
                         INSERT INTO attendance 
                         (attendance_date, attendance_student_id, attendance_class_id, attendance_status)
                         VALUES (%s, %s, %s, %s)
                     """, (date, student_id, course_id, status))
-                
-                success_count += 1
+                    success_count += 1
                 
             except Exception as e:
                 print(f"Error processing student {student_id}: {str(e)}")
                 error_count += 1
         
         connection.commit()
-        return True, f"Successfully processed {success_count} students. {error_count} errors."
+        return True, f"Processed {success_count} new attendance records. Skipped {skipped_count} existing records. {error_count} errors."
         
     except Exception as e:
-        return False, f"Error processing attendance: {str(e)}"
+        print(f"Database error: {str(e)}")
+        return False, f"Database error: {str(e)}"
+        
     finally:
-        if connection.is_connected():
-            cursor.close()
+        if connection:
             connection.close()
 
 def verify_teacher_password(password):
@@ -77,26 +73,28 @@ def verify_teacher_password(password):
         return False
 
 def process_missing_attendance(course_id, date):
-    """Mark all students without attendance as absent"""
+    """Mark students without attendance records for the day as absent"""
     # Get all students in the course
     students = utils.get_student_list(course_id)
     if not students:
         return False, "No students found in this course"
     
-    # Get students who already have attendance
-    present_students = utils.get_attendance_for_date(course_id, date)
-    if not present_students:
-        present_students = []
+    # Get all attendance records for the date (both present and absent)
+    attendance_records = utils.get_attendance_for_date(course_id, date)
+    if not attendance_records:
+        attendance_records = []
     
-    present_ids = [student['attendance_student_id'] for student in present_students]
+    # Get IDs of students who already have any attendance status for the day
+    recorded_ids = [record['attendance_student_id'] for record in attendance_records]
     
-    # Mark absent for students without attendance
+    # Process only students without any attendance record for the day
     success_count = 0
     error_count = 0
     
     for student in students:
         student_id = student['list_student_id']
-        if student_id not in present_ids:
+        # Only mark absent if student has no attendance record for the day
+        if student_id not in recorded_ids:
             success, error = utils.register_attendance(
                 student_id,
                 course_id,
@@ -108,7 +106,7 @@ def process_missing_attendance(course_id, date):
             else:
                 error_count += 1
     
-    return True, f"Processed {success_count} absences. {error_count} errors."
+    return True, f"Marked {success_count} students as absent. {error_count} errors occurred."
 
 def delete_date_attendance(course_id, date):
     """Delete all attendance records for a specific date"""
@@ -267,16 +265,16 @@ def main():
         )
         
         # Single password input and confirmation button
-        st.warning(f"This will mark ALL students as {status} for {manage_date}")
+        st.warning(f"This will mark ALL other students as {status} for {manage_date}")
         password = st.text_input(
             "Enter your password to confirm", 
             type="password",
             key="bulk_password"
         )
         
-        if st.button(f"Mark All as {status.title()}", type="primary"):
+        if st.button(f"Mark All other as {status.title()}", type="primary"):
             if verify_teacher_password(password):
-                with st.spinner(f"Marking all students as {status}..."):
+                with st.spinner(f"Marking all other students as {status}..."):
                     success, message = process_bulk_attendance(
                         course['course_id'],
                         manage_date,

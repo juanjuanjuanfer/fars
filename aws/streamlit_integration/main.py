@@ -72,7 +72,7 @@ with col2:
     """, unsafe_allow_html=True)
 
 with col3:
-    st.markdown('<p class="team-header">Data Engineers</p>', unsafe_allow_html=True)
+    st.markdown('<p class="team-header">Data Scientists</p>', unsafe_allow_html=True)
     st.markdown("""
     <p class="team-member">• Miguel Bastarrachea</p>
     <p class="team-member">• Yahir Sulu</p>
