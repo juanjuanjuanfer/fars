@@ -1,6 +1,6 @@
 import streamlit as st
-import mysql.connector
-from mysql.connector import Error
+import pymysql
+from pymysql import Error
 import toml
 import boto3
 from io import BytesIO
@@ -25,62 +25,54 @@ def get_db_connection():
     try:
         credentials = read_db_credentials()
 
-        connection = mysql.connector.connect(
+        connection = pymysql.connect(
             host="bd-fars.cnamsmiius1y.us-east-1.rds.amazonaws.com",
             port=3306,
             user=credentials["user"],
             password=credentials["password"],
-            database=credentials["database"]
+            database=credentials["database"],
+            cursorclass=pymysql.cursors.DictCursor  # This enables dictionary cursors by default
         )
-        if connection.is_connected():
+        if connection.open:
             print("Connected to MySQL database")
             return connection
             
     except Error as e:
         st.error(f"Error connecting to MySQL database: {str(e)}")
         return None
-
 def get_courses(username):
     """
     Fetch courses from database with owner information, filtered by username
-    
-    Args:
-        username (str): Username from session state to filter courses
-        
-    Returns:
-        list: List of courses belonging to the specified user
     """
     connection = get_db_connection()
     if not connection:
         return []
     
     try:
-        cursor = connection.cursor(dictionary=True)
-        # Updated query to join courses with users table and filter by username
-        query = """
-        SELECT 
-            c.course_id,
-            c.course_name,
-            c.course_owner,
-            u.user_name as owner_name,
-            u.user_email as owner_email,
-            u.user_username as owner_username
-        FROM courses c
-        LEFT JOIN users u ON c.course_owner = u.user_id
-        WHERE u.user_username = %s
-        """
-        cursor.execute(query, (username,))
-        courses = cursor.fetchall()
-        return courses
+        with connection.cursor() as cursor:
+            query = """
+            SELECT 
+                c.course_id,
+                c.course_name,
+                c.course_owner,
+                u.user_name as owner_name,
+                u.user_email as owner_email,
+                u.user_username as owner_username
+            FROM courses c
+            LEFT JOIN users u ON c.course_owner = u.user_id
+            WHERE u.user_username = %s
+            """
+            cursor.execute(query, (username,))
+            courses = cursor.fetchall()
+            return courses
     
     except Error as e:
         st.error(f"Error fetching courses: {str(e)}")
         return []
     
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
+
 
 
 def read_credentials(option = "aws"):
@@ -181,20 +173,19 @@ def verify_login(username, password):
         return False
 
     try:
-        cursor = connection.cursor(dictionary=True)
-        query = "SELECT * FROM users WHERE user_username = %s AND user_password = %s"
-        cursor.execute(query, (username, password))
-        user = cursor.fetchone()
-        return user is not None
+        with connection.cursor() as cursor:
+            query = "SELECT * FROM users WHERE user_username = %s AND user_password = %s"
+            cursor.execute(query, (username, password))
+            user = cursor.fetchone()
+            return user is not None
 
     except Error as e:
         st.error(f"Error verifying login: {str(e)}")
         return False
 
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
+
 
 
 def get_student_list(course):
@@ -203,20 +194,18 @@ def get_student_list(course):
         return []
 
     try:
-        cursor = connection.cursor(dictionary=True)
-        query = "SELECT * FROM lists WHERE list_course_id = %s"
-        cursor.execute(query, (course,))
-        students = cursor.fetchall()
-        return students
+        with connection.cursor() as cursor:
+            query = "SELECT * FROM lists WHERE list_course_id = %s"
+            cursor.execute(query, (course,))
+            students = cursor.fetchall()
+            return students
 
     except Error as e:
         st.error(f"Error fetching students: {str(e)}")
         return []
 
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
 
 
 def check_student_exists(student_id):
@@ -227,16 +216,14 @@ def check_student_exists(student_id):
     connection = get_db_connection()
         
     try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT student_id FROM students WHERE student_id = %s", (student_id,))
-        exists = cursor.fetchone() is not None
-        return exists, None
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT student_id FROM students WHERE student_id = %s", (student_id,))
+            exists = cursor.fetchone() is not None
+            return exists, None
     except Error as e:
         return False, f"Database query error: {str(e)}"
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
 
 def register_student(student_id, student_name, student_email):
     """
@@ -244,21 +231,18 @@ def register_student(student_id, student_name, student_email):
     Returns: (success, error_message)
     """
     connection = get_db_connection()
-
         
     try:
-        cursor = connection.cursor()
-        sql = """INSERT INTO students (student_id, student_name, student_email) 
-                 VALUES (%s, %s, %s)"""
-        cursor.execute(sql, (student_id, student_name, student_email))
-        connection.commit()
-        return True, None
+        with connection.cursor() as cursor:
+            sql = """INSERT INTO students (student_id, student_name, student_email) 
+                     VALUES (%s, %s, %s)"""
+            cursor.execute(sql, (student_id, student_name, student_email))
+            connection.commit()
+            return True, None
     except Error as e:
         return False, f"Failed to register student: {str(e)}"
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
 
 def insert_student_into_list(student_id, course_id):
     """
@@ -267,52 +251,45 @@ def insert_student_into_list(student_id, course_id):
     """
     connection = get_db_connection()
 
-
     try:
-        cursor = connection.cursor()
-        sql = """INSERT INTO lists (list_student_id, list_course_id)
-                 VALUES (%s, %s)"""
-        cursor.execute(sql, (student_id, course_id))
-        connection.commit()
-        return True, None
+        with connection.cursor() as cursor:
+            sql = """INSERT INTO lists (list_student_id, list_course_id)
+                     VALUES (%s, %s)"""
+            cursor.execute(sql, (student_id, course_id))
+            connection.commit()
+            return True, None
     except Error as e:
         return False, f"Failed to insert student into list: {str(e)}"
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
 
-def register_user(user_name,user_username,user_password,user_email):
+def register_user(user_name, user_username, user_password, user_email):
     connection = get_db_connection()
 
     try:
-        cursor = connection.cursor()
-        sql = """INSERT INTO users (user_name, user_username, user_password, user_email)
-                 VALUES (%s, %s, %s, %s)"""
-        cursor.execute(sql, (user_name, user_username, user_password, user_email))
-        connection.commit()
-        return True, None
+        with connection.cursor() as cursor:
+            sql = """INSERT INTO users (user_name, user_username, user_password, user_email)
+                     VALUES (%s, %s, %s, %s)"""
+            cursor.execute(sql, (user_name, user_username, user_password, user_email))
+            connection.commit()
+            return True, None
     except Error as e:
         return False, f"Failed to register user: {str(e)}"
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
 
 def verify_register(email):
     connection = get_db_connection()
 
     try:
-        cursor = connection.cursor()
-        cursor.execute("SELECT user_email FROM users WHERE user_email = %s", (email ))
-        exists = cursor.fetchone() is not None
-        return exists
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT user_email FROM users WHERE user_email = %s", (email,))
+            exists = cursor.fetchone() is not None
+            return exists
     except Error as e:
         return False, f"Database query error: {str(e)}"
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
 
 def compare_faces_rekognition(rekognition_client, source_bytes, bucket_name, course_id):
     """
@@ -320,26 +297,22 @@ def compare_faces_rekognition(rekognition_client, source_bytes, bucket_name, cou
     Returns: (student_id, confidence) or (None, None) if no match
     """
     try:
-        # Convert the source image bytes to required format
         source_image = {'Bytes': source_bytes}
         
-        # Get all students in the course
         connection = get_db_connection()
         if not connection:
             return None, None
             
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT list_student_id FROM lists WHERE list_course_id = %s", (course_id,))
-        students = cursor.fetchall()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT list_student_id FROM lists WHERE list_course_id = %s", (course_id,))
+            students = cursor.fetchall()
         
         highest_similarity = 0
         matched_student = None
         
-        # Compare with each student's image
         for student in students:
             student_id = student['list_student_id']
             target_image = {'S3Object': {'Bucket': bucket_name, 'Name': f"{student_id}.jpg"}}
-            print(target_image)
             try:
                 response = rekognition_client.compare_faces(
                     SourceImage=source_image,
@@ -363,9 +336,9 @@ def compare_faces_rekognition(rekognition_client, source_bytes, bucket_name, cou
         print(f"Error in face comparison: {str(e)}")
         return None, None
     finally:
-        if 'connection' in locals() and connection.is_connected():
-            cursor.close()
+        if 'connection' in locals() and connection.open:
             connection.close()
+
 
 def get_student_name(student_id):
     """
@@ -377,18 +350,16 @@ def get_student_name(student_id):
         return None, "Database connection failed"
         
     try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT student_name FROM students WHERE student_id = %s", (student_id,))
-        result = cursor.fetchone()
-        if result:
-            return result['student_name'], None
-        return None, "Student not found"
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT student_name FROM students WHERE student_id = %s", (student_id,))
+            result = cursor.fetchone()
+            if result:
+                return result['student_name'], None
+            return None, "Student not found"
     except Error as e:
         return None, f"Database error: {str(e)}"
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
 
 def register_attendance(student_id, course_id, status, date=None):
     """
@@ -403,33 +374,29 @@ def register_attendance(student_id, course_id, status, date=None):
         return False, "Database connection failed"
         
     try:
-        cursor = connection.cursor()
-        
-        # Check if attendance already registered for this date
-        cursor.execute("""
-            SELECT * FROM attendance 
-            WHERE attendance_date = %s 
-            AND attendance_student_id = %s 
-            AND attendance_class_id = %s
-        """, (date, student_id, course_id))
-        
-        if cursor.fetchone():
-            return False, "Attendance already registered for this date"
-        
-        # Insert new attendance record
-        sql = """INSERT INTO attendance 
-                (attendance_date, attendance_student_id, attendance_class_id, attendance_status)
-                VALUES (%s, %s, %s, %s)"""
-        cursor.execute(sql, (date, student_id, course_id, status))
-        connection.commit()
-        return True, None
+        with connection.cursor() as cursor:
+            # Check if attendance already registered for this date
+            cursor.execute("""
+                SELECT * FROM attendance 
+                WHERE attendance_date = %s 
+                AND attendance_student_id = %s 
+                AND attendance_class_id = %s
+            """, (date, student_id, course_id))
+            
+            if cursor.fetchone():
+                return False, "Attendance already registered for this date"
+            
+            # Insert new attendance record
+            sql = """INSERT INTO attendance 
+                    (attendance_date, attendance_student_id, attendance_class_id, attendance_status)
+                    VALUES (%s, %s, %s, %s)"""
+            cursor.execute(sql, (date, student_id, course_id, status))
+            connection.commit()
+            return True, None
     except Error as e:
         return False, f"Failed to register attendance: {str(e)}"
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-# Add these functions to your utils.py
+        connection.close()
 
 def create_collection(rekognition_client, collection_id):
     """Create a Rekognition collection if it doesn't exist"""
@@ -626,24 +593,22 @@ def get_attendance_count(course_id, date):
         return 0
         
     try:
-        cursor = connection.cursor()
-        cursor.execute("""
-            SELECT COUNT(*) as count 
-            FROM attendance 
-            WHERE attendance_class_id = %s 
-            AND attendance_date = %s
-        """, (course_id, date))
-        
-        result = cursor.fetchone()
-        return result[0] if result else 0
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT COUNT(*) as count 
+                FROM attendance 
+                WHERE attendance_class_id = %s 
+                AND attendance_date = %s
+            """, (course_id, date))
+            
+            result = cursor.fetchone()
+            return result['count'] if result else 0
         
     except Error as e:
         print(f"Error getting attendance count: {e}")
         return 0
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
 
 def get_attendance_for_date(course_id, date):
     """Get all attendance records for a specific date"""
@@ -652,22 +617,20 @@ def get_attendance_for_date(course_id, date):
         return None
         
     try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("""
-            SELECT * FROM attendance 
-            WHERE attendance_class_id = %s 
-            AND attendance_date = %s
-        """, (course_id, date))
-        
-        return cursor.fetchall()
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT * FROM attendance 
+                WHERE attendance_class_id = %s 
+                AND attendance_date = %s
+            """, (course_id, date))
+            
+            return cursor.fetchall()
         
     except Error as e:
         print(f"Error getting attendance records: {e}")
         return None
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
 
 def delete_attendance_for_date(course_id, date):
     """Delete all attendance records for a specific date"""
@@ -676,22 +639,20 @@ def delete_attendance_for_date(course_id, date):
         return False, "Database connection failed"
         
     try:
-        cursor = connection.cursor()
-        cursor.execute("""
-            DELETE FROM attendance 
-            WHERE attendance_class_id = %s 
-            AND attendance_date = %s
-        """, (course_id, date))
-        
-        connection.commit()
-        if cursor.rowcount > 0:
-            return True, None
-        else:
-            return False, "No records found to delete"
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM attendance 
+                WHERE attendance_class_id = %s 
+                AND attendance_date = %s
+            """, (course_id, date))
+            
+            connection.commit()
+            if cursor.rowcount > 0:
+                return True, None
+            else:
+                return False, "No records found to delete"
             
     except Error as e:
         return False, f"Error deleting attendance records: {str(e)}"
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()

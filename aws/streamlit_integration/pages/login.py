@@ -1,6 +1,5 @@
 import streamlit as st
 import utils
-import random
 import requests
 
 # Giphy API configuration

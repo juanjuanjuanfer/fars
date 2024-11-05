@@ -6,24 +6,20 @@ import io
 import calendar
 import plotly.graph_objects as go
 
-
-
 def get_month_options(first_date, last_date):
     """Generate a list of months between two dates"""
     months = []
-    current = first_date.replace(day=1)  # Start at beginning of first month
-    last = last_date.replace(day=1)  # Compare with beginning of last month
+    current = first_date.replace(day=1)
+    last = last_date.replace(day=1)
     
     while current <= last:
         months.append(current)
-        # Move to next month
         if current.month == 12:
             current = current.replace(year=current.year + 1, month=1)
         else:
             try:
                 current = current.replace(month=current.month + 1)
             except ValueError:
-                # Handle case where next month has fewer days
                 current = current.replace(day=1, month=current.month + 1)
     
     return months
@@ -35,20 +31,18 @@ def get_available_dates(course_id):
         return []
         
     try:
-        cursor = connection.cursor()
-        cursor.execute("""
-            SELECT DISTINCT attendance_date 
-            FROM attendance 
-            WHERE attendance_class_id = %s 
-            ORDER BY attendance_date
-        """, (course_id,))
-        
-        dates = [row[0] for row in cursor.fetchall()]
-        return dates
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT DISTINCT attendance_date 
+                FROM attendance 
+                WHERE attendance_class_id = %s 
+                ORDER BY attendance_date
+            """, (course_id,))
+            
+            dates = [row['attendance_date'] for row in cursor.fetchall()]
+            return dates
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
 
 def generate_attendance_report(course_id, start_date, end_date):
     """Generate attendance report for date range"""
@@ -57,82 +51,81 @@ def generate_attendance_report(course_id, start_date, end_date):
         return None, "Database connection failed"
         
     try:
-        cursor = connection.cursor()
-        
-        # Get all dates in range that have attendance
-        cursor.execute("""
-            SELECT DISTINCT attendance_date 
-            FROM attendance 
-            WHERE attendance_class_id = %s 
-            AND attendance_date BETWEEN %s AND %s 
-            ORDER BY attendance_date
-        """, (course_id, start_date, end_date))
-        
-        dates = [row[0] for row in cursor.fetchall()]
-        
-        if not dates:
-            return None, "No attendance records found for selected date range"
+        with connection.cursor() as cursor:
+            # Get all dates in range that have attendance
+            cursor.execute("""
+                SELECT DISTINCT attendance_date 
+                FROM attendance 
+                WHERE attendance_class_id = %s 
+                AND attendance_date BETWEEN %s AND %s 
+                ORDER BY attendance_date
+            """, (course_id, start_date, end_date))
             
-        # Construct dynamic SQL query
-        date_columns = []
-        for date in dates:
-            formatted_date = date.strftime('%Y-%m-%d')
-            date_columns.append(f"""
-                MAX(CASE WHEN attendance.attendance_date = '{formatted_date}' 
-                    THEN COALESCE(attendance.attendance_status, 'N/A') 
-                END) AS '{formatted_date}'
-            """)
-        
-        date_columns_sql = ", ".join(date_columns)
-        
-        query = f"""
-            SELECT 
-                students.student_name,
-                students.student_id,
-                {date_columns_sql}
-            FROM 
-                students
-            LEFT JOIN 
-                lists ON students.student_id = lists.list_student_id
-            LEFT JOIN 
-                attendance ON students.student_id = attendance.attendance_student_id
-                AND attendance.attendance_date BETWEEN %s AND %s
-                AND attendance.attendance_class_id = %s
-            WHERE 
-                lists.list_course_id = %s
-            GROUP BY 
-                students.student_name,
-                students.student_id
-            ORDER BY 
-                students.student_name
-        """
-        
-        cursor.execute(query, (start_date, end_date, course_id, course_id))
-        columns = [desc[0] for desc in cursor.description]
-        data = cursor.fetchall()
-        
-        # Convert to DataFrame
-        df = pd.DataFrame(data, columns=columns)
-        
-        # Convert present/absent to P/A in date columns
-        date_columns = [col for col in df.columns if col not in ['student_name', 'student_id']]
-        for col in date_columns:
-            df[col] = df[col].replace({'present': 'P', 'absent': 'A'})
-        
-        # Calculate attendance statistics
-        if len(dates) > 0:
-            df['Total Present'] = df.iloc[:, 2:].apply(lambda x: (x == 'P').sum(), axis=1)
-            df['Total Absent'] = df.iloc[:, 2:].apply(lambda x: (x == 'A').sum(), axis=1)
-            df['Attendance Rate'] = (df['Total Present'] / len(dates) * 100).round(2)
-        
-        return df, None
-        
+            dates = [row['attendance_date'] for row in cursor.fetchall()]
+            
+            if not dates:
+                return None, "No attendance records found for selected date range"
+                
+            # Construct dynamic SQL query
+            date_columns = []
+            for date in dates:
+                formatted_date = date.strftime('%Y-%m-%d')
+                date_columns.append(f"""
+                    MAX(CASE WHEN attendance.attendance_date = '{formatted_date}' 
+                        THEN COALESCE(attendance.attendance_status, 'N/A') 
+                    END) AS '{formatted_date}'
+                """)
+            
+            date_columns_sql = ", ".join(date_columns)
+            
+            query = f"""
+                SELECT 
+                    students.student_name,
+                    students.student_id,
+                    {date_columns_sql}
+                FROM 
+                    students
+                LEFT JOIN 
+                    lists ON students.student_id = lists.list_student_id
+                LEFT JOIN 
+                    attendance ON students.student_id = attendance.attendance_student_id
+                    AND attendance.attendance_date BETWEEN %s AND %s
+                    AND attendance.attendance_class_id = %s
+                WHERE 
+                    lists.list_course_id = %s
+                GROUP BY 
+                    students.student_name,
+                    students.student_id
+                ORDER BY 
+                    students.student_name
+            """
+            
+            cursor.execute(query, (start_date, end_date, course_id, course_id))
+            data = cursor.fetchall()
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(data)
+            
+            # Rename columns
+            df.columns = ['student_name', 'student_id'] + [str(date) for date in dates]
+            
+            # Convert present/absent to P/A in date columns
+            date_columns = [col for col in df.columns if col not in ['student_name', 'student_id']]
+            for col in date_columns:
+                df[col] = df[col].replace({'present': 'P', 'absent': 'A'})
+            
+            # Calculate attendance statistics
+            if len(dates) > 0:
+                df['Total Present'] = df.iloc[:, 2:].apply(lambda x: (x == 'P').sum(), axis=1)
+                df['Total Absent'] = df.iloc[:, 2:].apply(lambda x: (x == 'A').sum(), axis=1)
+                df['Attendance Rate'] = (df['Total Present'] / len(dates) * 100).round(2)
+            
+            return df, None
+            
     except Exception as e:
         return None, f"Error generating report: {str(e)}"
     finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
+        connection.close()
 
 def main():
     st.title("Attendance Report Generator")
