@@ -2,6 +2,70 @@ import streamlit as st
 import utils
 from datetime import datetime
 
+def process_bulk_attendance(course_id, date, status):
+    """Mark all students with specified attendance status"""
+    connection = utils.get_db_connection()
+    if not connection:
+        return False, "Database connection failed"
+        
+    try:
+        cursor = connection.cursor()
+        
+        # Get all students in the course
+        students = utils.get_student_list(course_id)
+        if not students:
+            return False, "No students found in this course"
+        
+        # Get existing attendance records
+        cursor.execute("""
+            SELECT attendance_student_id 
+            FROM attendance 
+            WHERE attendance_class_id = %s 
+            AND attendance_date = %s
+        """, (course_id, date))
+        
+        existing_records = [r[0] for r in cursor.fetchall()]
+        
+        # Process attendance for all students
+        success_count = 0
+        error_count = 0
+        
+        for student in students:
+            student_id = student['list_student_id']
+            
+            try:
+                if student_id in existing_records:
+                    # Update existing record
+                    cursor.execute("""
+                        UPDATE attendance 
+                        SET attendance_status = %s 
+                        WHERE attendance_student_id = %s 
+                        AND attendance_class_id = %s 
+                        AND attendance_date = %s
+                    """, (status, student_id, course_id, date))
+                else:
+                    # Insert new record
+                    cursor.execute("""
+                        INSERT INTO attendance 
+                        (attendance_date, attendance_student_id, attendance_class_id, attendance_status)
+                        VALUES (%s, %s, %s, %s)
+                    """, (date, student_id, course_id, status))
+                
+                success_count += 1
+                
+            except Exception as e:
+                print(f"Error processing student {student_id}: {str(e)}")
+                error_count += 1
+        
+        connection.commit()
+        return True, f"Successfully processed {success_count} students. {error_count} errors."
+        
+    except Exception as e:
+        return False, f"Error processing attendance: {str(e)}"
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
 
 def verify_teacher_password(password):
     """Verify if the entered password matches the course owner's password"""
@@ -176,72 +240,74 @@ def main():
     manage_tab, delete_tab = st.tabs(["Complete Attendance", "Delete Attendance"])
     
     with manage_tab:
-        st.write("Complete attendance for a specific date by marking absent all students without attendance.")
+        st.write("Set attendance status for all students on a specific date.")
         manage_date = st.date_input(
-            "Select date to complete",
+            "Select date",
             datetime.now().date(),
             max_value=datetime.now().date(),
             key="manage_date"
         )
         
-        # Check if date already completed
+        # Get current attendance stats
         attendance_count = utils.get_attendance_count(course['course_id'], manage_date)
         student_count = len(utils.get_student_list(course['course_id']))
         
-        if attendance_count == student_count:
-            st.warning(f"✅ Attendance for {manage_date} is already complete!")
-        else:
-            missing_count = student_count - attendance_count
-            st.info(f"ℹ️ {missing_count} students without attendance for {manage_date}")
-            
-            if st.button("Complete Attendance", type="primary"):
-                password = st.text_input("Enter your password to confirm", type="password")
-                if st.button("Confirm"):
-                    if verify_teacher_password(password):
-                        with st.spinner("Processing missing attendance..."):
-                            success, message = process_missing_attendance(
-                                course['course_id'],
-                                manage_date
-                            )
-                            if success:
-                                st.success(f"✅ {message}")
-                                st.balloons()
-                            else:
-                                st.error(f"❌ Error: {message}")
+        st.info(f"""
+        📊 **Current Status for {manage_date}:**
+        - Total Students: {student_count}
+        - Recorded Attendance: {attendance_count}
+        """)
+        
+        # Select attendance status
+        status = st.radio(
+            "Select attendance status to apply:",
+            options=["present", "absent"],
+            horizontal=True,
+            format_func=lambda x: "Present ✅" if x == "present" else "Absent ❌"
+        )
+        
+        # Single password input and confirmation button
+        st.warning(f"This will mark ALL students as {status} for {manage_date}")
+        password = st.text_input(
+            "Enter your password to confirm", 
+            type="password",
+            key="bulk_password"
+        )
+        
+        if st.button(f"Mark All as {status.title()}", type="primary"):
+            if verify_teacher_password(password):
+                with st.spinner(f"Marking all students as {status}..."):
+                    success, message = process_bulk_attendance(
+                        course['course_id'],
+                        manage_date,
+                        status
+                    )
+                    
+                    if success:
+                        st.success(f"✅ {message}")
+                        st.balloons()
                     else:
-                        st.error("❌ Invalid password")
-    
+                        st.error(f"❌ Error: {message}")
+            else:
+                st.error("❌ Invalid password")
+
     with delete_tab:
         st.write("Delete all attendance records for a specific date.")
         delete_date = st.date_input(
-            "Select date to delete",
+            "Select date",
             datetime.now().date(),
             max_value=datetime.now().date(),
             key="delete_date"
         )
         
-        # Show current attendance count for selected date
-        current_count = utils.get_attendance_count(course['course_id'], delete_date)
-        if current_count > 0:
-            st.info(f"ℹ️ {current_count} attendance records found for {delete_date}")
-            
-
-            password = st.text_input("Enter your password to confirm deletion", type="password", key="delete_password")
-            if st.button("Confirm Deletion"):
-                if verify_teacher_password(password):
-                    with st.spinner("Deleting attendance records..."):
-                        success, error = delete_date_attendance(
-                            course['course_id'],
-                            delete_date
-                        )
-                        if success:
-                            st.success("✅ Attendance records deleted successfully!")
-                        else:
-                            st.error(f"❌ Error: {error}")
+        if st.button("Delete Attendance", key="delete_button", type="primary"):
+            with st.spinner("Deleting attendance records..."):
+                success, message = delete_date_attendance(course['course_id'], delete_date)
+                if success:
+                    st.success(f"✅ {message}")
+                    st.balloons()
                 else:
-                    st.error("❌ Invalid password")
-        else:
-            st.warning(f"No attendance records found for {delete_date}")
+                    st.error(f"❌ Error: {message}")
 
 if __name__ == "__main__":
     main()
